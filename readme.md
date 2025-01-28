@@ -2,6 +2,29 @@
 
 A PyTorch implementation of BERT (Bidirectional Encoder Representations from Transformers) pre-trained on Turkish text data. This implementation includes custom Turkish tokenization with morphological analysis and supports training on various devices (CUDA, MPS, CPU).
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
+
+## Features
+
+- **Dual Implementation Turkish Tokenizer**
+  - Python implementation (default)
+  - High-performance Rust implementation (optional)
+  - Morphological analysis
+  - Root word detection
+  - Suffix handling
+  - Special token support ([CLS], [SEP], [MASK])
+  - Vocabulary size of 32,768 tokens
+
+## Key Highlights
+
+- **Novel Tokenization**: Combines morphological analysis with BPE for better Turkish language understanding
+- **Dual Implementation**: Choose between Python (easy integration) or Rust (high performance)
+- **Comprehensive Monitoring**: Detailed training metrics and progress tracking
+- **Multi-device Support**: Works on CUDA, MPS (Apple Silicon), and CPU
+- **Flexible Architecture**: Easily configurable model size and training parameters
+
 ## Quick Start
 
 ```bash
@@ -33,30 +56,79 @@ python train.py \
     --num_epochs 40
 ```
 
-## Features
+## Project Status
 
-- **Custom Turkish Tokenizer**
-  - Morphological analysis
-  - Root word detection
-  - Suffix handling
-  - Special token support ([CLS], [SEP], [MASK])
-  - Vocabulary size of 32,768 tokens
+- [x] Core BERT implementation
+- [x] Turkish tokenizer (Python)
+- [x] Turkish tokenizer (Rust)
+- [x] Training monitoring and metrics
+- [x] Multi-device support
+- [x] Checkpoint management
+- [ ] Pre-trained model release
+- [ ] Fine-tuning examples
+- [ ] Comprehensive tests
 
-- **Model Architecture**
-  - Based on BERT-base architecture
-  - 12 transformer layers (configurable)
-  - 12 attention heads (configurable)
-  - 768 hidden size (configurable)
-  - ~110M parameters
-  - Maximum sequence length of 512 tokens
+## Model Architecture
 
-- **Training Features**
-  - Masked Language Model (MLM) pre-training
-  - Next Sentence Prediction (NSP)
-  - Learning rate scheduling with warmup
-  - Multi-device support (CUDA, MPS, CPU)
-  - Automatic checkpointing
-  - Progress tracking and logging
+- Based on BERT-base architecture
+- 12 transformer layers (configurable)
+- 12 attention heads (configurable)
+- 768 hidden size (configurable)
+- ~110M parameters
+- Maximum sequence length of 512 tokens
+
+## Directory Structure
+
+```
+turkish-bert/
+├── bert/                       # Core BERT implementation
+│   ├── bert_model.py          # BERT model architecture
+│   ├── dataset.py             # Data loading and processing
+│   ├── scheduler.py           # Learning rate scheduling
+│   ├── trainer.py             # Training loop and optimization
+│   └── utils.py               # Monitoring and utilities
+├── turkish_tokenizer/         # Tokenizer implementations
+│   ├── turkish_tokenizer.py   # Python implementation
+│   ├── src/                   # Rust implementation
+│   ├── kokler_v05.json        # Root words dictionary
+│   ├── ekler_v05.json         # Suffixes dictionary
+│   └── bpe_v05.json           # BPE tokens
+├── checkpoints/               # Training checkpoints
+│   ├── metrics/               # Training metrics
+│   └── models/                # Saved models
+├── data/                      # Training data
+├── LICENSE                    # MIT License
+├── README.md                  # This file
+├── CONTRIBUTING.md            # Contribution guidelines
+├── requirements.txt           # Python dependencies
+└── train.py                   # Training script
+```
+
+## Training Monitoring
+
+The training progress is tracked in detail with:
+
+```
+checkpoints/
+├── metrics/
+│   ├── epoch_X_report.json     # Per-epoch detailed metrics
+│   ├── training_summary.json   # Cumulative training statistics
+│   └── best_metrics.json       # Best model performance
+├── logs/
+│   └── training_log.txt        # Human-readable training log
+└── models/
+    ├── latest_checkpoint.pt    # Most recent model
+    ├── best_model.pt          # Best performing model
+    └── checkpoint_epoch_X.pt  # Periodic checkpoints
+```
+
+### Metrics Tracked
+- Training/Validation Loss
+- MLM Accuracy
+- NSP Accuracy
+- Learning Rate
+- Best Performance Records
+- Improvement Trends
 
 ## Requirements
 
@@ -65,6 +137,13 @@ torch>=1.12.0
 numpy>=1.21.0
 tqdm>=4.62.0
 pandas>=1.3.0
+```
+
+## Optional Requirements
+
+For Rust tokenizer:
+```bash
+cargo >= 1.70.0
 ```
 
 ## Memory Requirements
@@ -166,6 +245,23 @@ Hizmet kalitesi mükemmeldi.
 ## Turkish Tokenizer
 
 The project includes two implementations of the Turkish tokenizer:
+
+### Novel Tokenization Approach
+Our tokenizer combines multiple techniques for better Turkish language understanding:
+- **Morphological Analysis**: Handles Turkish's agglutinative nature
+- **Root Word Detection**: Uses comprehensive Turkish root word dictionary
+- **Suffix Analysis**: Processes Turkish suffixes separately
+- **BPE Tokenization**: Applies byte-pair encoding for unknown words
+- **Hybrid Strategy**: 
+  1. First attempts morphological decomposition (root + suffixes)
+  2. Falls back to BPE tokenization for unknown patterns
+  3. Special handling for uppercase/lowercase transformations
+
+This combined approach provides:
+- Better handling of Turkish word formations
+- More efficient vocabulary usage
+- Improved understanding of word relationships
+- Better handling of out-of-vocabulary words
 
 ### Python Implementation
 Located in `turkish_tokenizer/turkish_tokenizer.py`, this is the default implementation used by the training script. It provides:
@@ -297,7 +393,7 @@ If you use this code in your research, please cite:
 @software{turkish_bert,
   author = {M. Ali Bayram},
   title = {Turkish BERT: Pre-trained BERT Models for Turkish Language},
-  year = {2024},
+  year = {2025},
   publisher = {GitHub},
   url = {https://github.com/malibayram/turkish-bert}
 }

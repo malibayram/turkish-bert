@@ -15,30 +15,46 @@ class ScheduledOptim():
         self._optimizer = optimizer
         self.n_warmup_steps = n_warmup_steps
         self.n_current_steps = 0
-        self.init_lr = np.power(d_model, -0.5)
+        self.init_lr = d_model ** (-0.5)
 
-    def step_and_update_lr(self):
-        "Step with the inner optimizer"
+    def step(self):
+        """Step with the inner optimizer"""
         self._update_learning_rate()
         self._optimizer.step()
 
     def zero_grad(self):
-        "Zero out the gradients by the inner optimizer"
+        """Zero out the gradients with the inner optimizer"""
         self._optimizer.zero_grad()
 
     def _get_lr_scale(self):
-        """
-        Calculate the learning rate scale based on current step
-        Implements the formula from the Transformer paper
-        """
-        return np.min([
-            np.power(self.n_current_steps, -0.5),
-            np.power(self.n_warmup_steps, -1.5) * self.n_current_steps])
+        """Get learning rate scale based on warmup steps"""
+        return min(self.n_current_steps ** (-0.5), 
+                  self.n_current_steps * self.n_warmup_steps ** (-1.5))
 
     def _update_learning_rate(self):
-        ''' Learning rate scheduling per step '''
+        """Update learning rate based on current step"""
         self.n_current_steps += 1
         lr = self.init_lr * self._get_lr_scale()
 
         for param_group in self._optimizer.param_groups:
-            param_group['lr'] = lr 
+            param_group['lr'] = lr
+
+    def get_lr(self):
+        """Get current learning rate"""
+        return self._optimizer.param_groups[0]['lr']
+
+    def state_dict(self):
+        """Return state dict for checkpointing"""
+        return {
+            'optimizer': self._optimizer.state_dict(),
+            'n_warmup_steps': self.n_warmup_steps,
+            'n_current_steps': self.n_current_steps,
+            'init_lr': self.init_lr
+        }
+
+    def load_state_dict(self, state_dict):
+        """Load state from checkpoint"""
+        self._optimizer.load_state_dict(state_dict['optimizer'])
+        self.n_warmup_steps = state_dict['n_warmup_steps']
+        self.n_current_steps = state_dict['n_current_steps']
+        self.init_lr = state_dict['init_lr'] 

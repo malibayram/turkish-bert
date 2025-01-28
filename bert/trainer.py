@@ -1,7 +1,9 @@
 import torch
 from torch.optim import Adam
-import tqdm
+from tqdm import tqdm
 from bert.scheduler import ScheduledOptim
+from .utils import TrainingMonitor, EarlyStopping, Checkpointing
+import torch.nn.functional as F
 
 class BERTTrainer:
     def __init__(
@@ -14,7 +16,10 @@ class BERTTrainer:
         betas=(0.9, 0.999),
         warmup_steps=10000,
         log_freq=10,
-        device=None
+        device=None,
+        save_dir='checkpoints',
+        patience=3,
+        gradient_clip_val=1.0
         ):
         """
         Initialize BERTTrainer.
@@ -29,6 +34,9 @@ class BERTTrainer:
             warmup_steps: number of warmup steps for learning rate
             log_freq: logging frequency
             device: device to train on ('cuda', 'mps', or 'cpu')
+            save_dir: directory to save checkpoints
+            patience: patience for early stopping
+            gradient_clip_val: gradient clipping value
         """
         # Determine the device to use
         if device is None:
@@ -58,80 +66,133 @@ class BERTTrainer:
         self.criterion = torch.nn.NLLLoss(ignore_index=0)
         self.log_freq = log_freq
         print("Total Parameters:", sum([p.nelement() for p in self.model.parameters()]))
+        
+        self.monitor = TrainingMonitor(save_dir)
+        self.early_stopping = EarlyStopping(patience=patience)
+        self.checkpointing = Checkpointing(save_dir)
+        self.gradient_clip_val = gradient_clip_val
     
     def train(self, epoch):
-        """Train the model for one epoch"""
-        self.iteration(epoch, self.train_data)
-
-    def test(self, epoch):
-        """Test the model for one epoch"""
-        self.iteration(epoch, self.test_data, train=False)
-
-    def iteration(self, epoch, data_loader, train=True):
-        """
-        Loop over the data for one epoch
+        self.model.train()
+        total_loss = 0
+        total_mlm_correct = 0
+        total_nsp_correct = 0
+        total_tokens = 0
+        total_sequences = 0
         
-        Args:
-            epoch: current epoch number
-            data_loader: data loader to use
-            train: whether this is a training iteration
-        """
-        
-        avg_loss = 0.0
-        total_correct = 0
-        total_element = 0
-        
-        mode = "train" if train else "test"
-
-        # progress bar
-        data_iter = tqdm.tqdm(
-            enumerate(data_loader),
-            desc="EP_%s:%d" % (mode, epoch),
-            total=len(data_loader),
+        data_iter = tqdm(
+            enumerate(self.train_data),
+            desc=f"EP_{epoch}",
+            total=len(self.train_data),
             bar_format="{l_bar}{r_bar}"
         )
-
+        
         for i, data in data_iter:
-            # 0. batch_data will be sent into the device(GPU or cpu)
+            # Move data to device
             data = {key: value.to(self.device) for key, value in data.items()}
-
-            # 1. forward the next_sentence_prediction and masked_lm model
-            next_sent_output, mask_lm_output = self.model.forward(data["bert_input"], data["segment_label"])
-
-            # 2-1. NLL(negative log likelihood) loss of is_next classification result
+            
+            # Forward pass
+            next_sent_output, mask_lm_output = self.model.forward(
+                data["bert_input"], 
+                data["segment_label"]
+            )
+            
+            # Calculate losses
             next_loss = self.criterion(next_sent_output, data["is_next"])
-
-            # 2-2. NLLLoss of predicting masked token word
-            mask_loss = self.criterion(mask_lm_output.transpose(1, 2), data["bert_label"])
-
-            # 2-3. Adding next_loss and mask_loss : 3.4 Pre-training Procedure
+            mask_loss = self.criterion(
+                mask_lm_output.transpose(1, 2),
+                data["bert_label"]
+            )
             loss = next_loss + mask_loss
+            
+            # Backward pass
+            self.optim.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip_val)
+            self.optim.step()
+            
+            # Update metrics
+            total_loss += loss.item()
+            
+            # Calculate accuracies
+            mlm_correct = (mask_lm_output.argmax(dim=-1) == data["bert_label"]).sum().item()
+            nsp_correct = (next_sent_output.argmax(dim=-1) == data["is_next"]).sum().item()
+            
+            total_mlm_correct += mlm_correct
+            total_nsp_correct += nsp_correct
+            total_tokens += (data["bert_label"] != -100).sum().item()
+            total_sequences += data["is_next"].size(0)
+            
+            # Update progress bar
+            current_lr = self.optim_schedule.get_lr()
+            data_iter.set_description(
+                f"EP_{epoch} - loss: {loss.item():.4f}, lr: {current_lr:.2e}"
+            )
+            
+        # Calculate epoch metrics
+        epoch_loss = total_loss / len(self.train_data)
+        mlm_accuracy = total_mlm_correct / total_tokens if total_tokens > 0 else 0.0
+        nsp_accuracy = total_nsp_correct / total_sequences if total_sequences > 0 else 0.0
+        current_lr = self.optim_schedule.get_lr()
+        
+        metrics = {
+            'train_loss': float(epoch_loss),
+            'train_mlm_acc': float(mlm_accuracy),
+            'train_nsp_acc': float(nsp_accuracy),
+            'learning_rates': float(current_lr)
+        }
+        
+        print(f"\nTraining metrics for epoch {epoch}:")
+        for k, v in metrics.items():
+            print(f"{k}: {v}")
+        
+        return metrics
 
-            # 3. backward and optimization only in train
-            if train:
-                self.optim_schedule.zero_grad()
-                loss.backward()
-                self.optim_schedule.step_and_update_lr()
-
-            # next sentence prediction accuracy
-            correct = next_sent_output.argmax(dim=-1).eq(data["is_next"]).sum().item()
-            avg_loss += loss.item()
-            total_correct += correct
-            total_element += data["is_next"].nelement()
-
-            post_fix = {
-                "epoch": epoch,
-                "iter": i,
-                "avg_loss": avg_loss / (i + 1),
-                "avg_acc": total_correct / total_element * 100,
-                "loss": loss.item()
-            }
-
-            if i % self.log_freq == 0:
-                data_iter.write(str(post_fix))
-
-        print(
-            f"EP{epoch}, {mode}: \
-            avg_loss={avg_loss / len(data_iter)}, \
-            total_acc={total_correct * 100.0 / total_element}"
-        ) 
+    def test(self, epoch):
+        self.model.eval()
+        total_loss = 0
+        total_mlm_correct = 0
+        total_nsp_correct = 0
+        total_tokens = 0
+        total_sequences = 0
+        
+        with torch.no_grad():
+            for data in self.test_data:
+                data = {key: value.to(self.device) for key, value in data.items()}
+                next_sent_output, mask_lm_output = self.model.forward(
+                    data["bert_input"],
+                    data["segment_label"]
+                )
+                
+                next_loss = self.criterion(next_sent_output, data["is_next"])
+                mask_loss = self.criterion(
+                    mask_lm_output.transpose(1, 2),
+                    data["bert_label"]
+                )
+                loss = next_loss + mask_loss
+                
+                total_loss += loss.item()
+                
+                mlm_correct = (mask_lm_output.argmax(dim=-1) == data["bert_label"]).sum().item()
+                nsp_correct = (next_sent_output.argmax(dim=-1) == data["is_next"]).sum().item()
+                
+                total_mlm_correct += mlm_correct
+                total_nsp_correct += nsp_correct
+                total_tokens += (data["bert_label"] != -100).sum().item()
+                total_sequences += data["is_next"].size(0)
+                
+        val_loss = total_loss / len(self.test_data)
+        mlm_accuracy = total_mlm_correct / total_tokens if total_tokens > 0 else 0.0
+        nsp_accuracy = total_nsp_correct / total_sequences if total_sequences > 0 else 0.0
+        
+        metrics = {
+            'val_loss': float(val_loss),
+            'val_mlm_acc': float(mlm_accuracy),
+            'val_nsp_acc': float(nsp_accuracy)
+        }
+        
+        print(f"\nValidation metrics for epoch {epoch}:")
+        for k, v in metrics.items():
+            print(f"{k}: {v}")
+        
+        return metrics 

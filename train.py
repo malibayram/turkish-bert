@@ -5,6 +5,7 @@ from turkish_tokenizer.turkish_tokenizer import TurkishTokenizer
 from bert import BERT, BERTLM, BERTTrainer
 import argparse
 import os
+import matplotlib.pyplot as plt
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train Turkish BERT model')
@@ -170,27 +171,45 @@ def main():
         )
         
         # Training loop with error handling
+        best_val_loss = float('inf')
         for epoch in range(args.num_epochs):
             try:
-                trainer.train(epoch)
-                trainer.test(epoch)
+                # Training phase
+                train_metrics = trainer.train(epoch)
+                
+                # Validation phase
+                val_metrics = trainer.test(epoch)
+                
+                # Combine metrics
+                metrics = {**train_metrics, **val_metrics}
+                
+                # Update training monitor
+                trainer.monitor.update(metrics, epoch)
+                
+                # Check for best model
+                is_best = val_metrics['val_loss'] < best_val_loss
+                if is_best:
+                    best_val_loss = val_metrics['val_loss']
                 
                 # Save checkpoint
                 if args.save_freq > 0 and (epoch + 1) % args.save_freq == 0:
-                    save_path = f"{args.save_dir}/bert_epoch_{epoch+1}.pt"
-                    checkpoint = {
-                        'epoch': epoch,
-                        'model_state_dict': bert_lm.state_dict(),
-                        'optimizer_state_dict': trainer.optim.state_dict(),
-                        'optimizer_params': {
-                            'warmup_steps': trainer.optim_schedule.n_warmup_steps,  # Warmup steps
-                            'init_lr': trainer.optim_schedule.init_lr,  # Initial learning rate
-                        },
-                        'args': args.__dict__,
-                    }
-                    torch.save(checkpoint, save_path)
-                    print(f"Saved checkpoint to {save_path}")
+                    trainer.checkpointing.save(
+                        model=bert_lm,
+                        optimizer=trainer.optim,
+                        scheduler=trainer.optim_schedule,
+                        epoch=epoch,
+                        val_loss=val_metrics['val_loss'],
+                        metrics=metrics,
+                        args=args,
+                        is_best=is_best
+                    )
                     
+                # Early stopping check
+                trainer.early_stopping(val_metrics['val_loss'])
+                if trainer.early_stopping.early_stop:
+                    print("Early stopping triggered")
+                    break
+                
             except RuntimeError as e:
                 if "out of memory" in str(e):
                     print("WARNING: out of memory")
