@@ -63,7 +63,7 @@ class BERTTrainer:
             )
 
         # Using Negative Log Likelihood Loss function for predicting the masked_token
-        self.criterion = torch.nn.NLLLoss(ignore_index=0)
+        self.criterion = torch.nn.NLLLoss(ignore_index=8)
         self.log_freq = log_freq
         print("Total Parameters:", sum([p.nelement() for p in self.model.parameters()]))
         

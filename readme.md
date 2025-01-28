@@ -252,6 +252,11 @@ Our tokenizer combines multiple techniques for better Turkish language understan
 - **Root Word Detection**: Uses comprehensive Turkish root word dictionary
 - **Suffix Analysis**: Processes Turkish suffixes separately
 - **BPE Tokenization**: Applies byte-pair encoding for unknown words
+- **Special Tokens**: 
+  - [PAD] token (id: 8)
+  - [CLS] token (id: 5)
+  - [SEP] token (id: 6)
+  - [MASK] token (id: 7)
 - **Hybrid Strategy**: 
   1. First attempts morphological decomposition (root + suffixes)
   2. Falls back to BPE tokenization for unknown patterns

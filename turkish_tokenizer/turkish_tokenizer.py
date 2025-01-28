@@ -15,26 +15,23 @@ class TurkishTokenizer:
         
         # Special tokens
         self.special_tokens = {
+            "<uppercase>": 0,
             "<space>": 1,
             "<newline>": 2,
             "<tab>": 3,
             "<unknown>": 4,
-            "<uppercase>": 0,
             "[CLS]": 5,
             "[SEP]": 6,
             "[MASK]": 7,
-            "[PAD]": 0
+            "[PAD]": 8
         }
-        
-        # Add special tokens to vocabulary
-        self.vocab = {**self.roots, **self.suffixes, **self.bpe_tokens, **self.special_tokens}
-        
+
         # Special token attributes for BERT
         self.cls_token = "[CLS]"
         self.sep_token = "[SEP]"
         self.mask_token = "[MASK]"
         self.pad_token = "[PAD]"
-        self.pad_token_id = 0
+        self.pad_token_id = 8
         
     def load_json(self, file_path: str) -> Dict[str, int]:
         full_path = os.path.join(self.current_dir, file_path)
@@ -55,24 +52,57 @@ class TurkishTokenizer:
             for token in text_or_tokens:
                 if token in self.special_tokens:
                     ids.append(self.special_tokens[token])
-                elif token in self.vocab:
-                    ids.append(self.vocab[token])
+                elif token in self.bpe_tokens:
+                    ids.append(self.bpe_tokens[token])
+                elif token in self.roots:
+                    ids.append(self.roots[token])
+                elif token in self.suffixes:
+                    ids.append(self.suffixes[token])
                 else:
                     ids.append(self.special_tokens["<unknown>"])
             return ids
         
     def decode(self, ids: List[int]) -> str:
         tokens = []
-        reverse_vocab = {v: k for k, v in self.vocab.items()}
+        reverse_vocab = {}
+        for k, v in self.bpe_tokens.items():
+            reverse_vocab[v] = k
+        for k, v in self.roots.items():
+            reverse_vocab[v] = k
+        for k, v in self.suffixes.items():
+            reverse_vocab[v] = k
+        for k, v in self.special_tokens.items():
+            reverse_vocab[v] = k
+
+        with open("reverse_vocab.json", "w", encoding="utf-8") as f:
+            json.dump(reverse_vocab, f, ensure_ascii=False, indent=4)
+
+        make_next_uppercase = False
+        
         for id in ids:
             if id in reverse_vocab:
-                tokens.append(reverse_vocab[id])
+                if id == 0:  # <uppercase> token
+                    make_next_uppercase = True
+                    continue
+                elif id == 1:
+                    tokens.append(" ")
+                elif id == 2:
+                    tokens.append("\n")
+                elif id == 3:
+                    tokens.append("\t")
+                else:
+                    token = reverse_vocab[id]
+                    if make_next_uppercase:
+                        token = token.capitalize()
+                        make_next_uppercase = False
+                    tokens.append(token)
             else:
                 tokens.append("<unknown>")
-        return " ".join(tokens)
+        
+        return "".join(tokens)  # Changed from " ".join to handle spaces properly
     
     def get_vocab(self) -> Dict[str, int]:
-        return self.vocab
+        return {**self.roots, **self.suffixes, **self.bpe_tokens, **self.special_tokens}
 
 # Get the directory of the current file
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -90,11 +120,11 @@ bpe_tokens = load_json("bpe_v05.json")
 
 # Special token IDs
 SPECIAL_TOKENS = {
+    "<uppercase>": 0,
     "<space>": 1,
     "<newline>": 2,
     "<tab>": 3,
-    "<unknown>": 4,
-    "<uppercase>": 0
+    "<unknown>": 4
 }
 
 # Tokenize the input text
